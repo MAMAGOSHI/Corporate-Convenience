@@ -749,36 +749,36 @@ def create_app():
 
         db.session.commit()
 
-    # Optional first administrator setup for Render.
-    bootstrap_number = os.getenv("BOOTSTRAP_ADMIN_EMPLOYEE_NUMBER", "").strip()
-    bootstrap_name = os.getenv("BOOTSTRAP_ADMIN_NAME", "").strip()
-    bootstrap_email = os.getenv("BOOTSTRAP_ADMIN_EMAIL", "").strip().lower()
-    bootstrap_password = os.getenv("BOOTSTRAP_ADMIN_PASSWORD", "")
+        # Optional first administrator setup for Render.
+        bootstrap_number = os.getenv("BOOTSTRAP_ADMIN_EMPLOYEE_NUMBER", "").strip()
+        bootstrap_name = os.getenv("BOOTSTRAP_ADMIN_NAME", "").strip()
+        bootstrap_email = os.getenv("BOOTSTRAP_ADMIN_EMAIL", "").strip().lower()
+        bootstrap_password = os.getenv("BOOTSTRAP_ADMIN_PASSWORD", "")
 
-    if all((bootstrap_number, bootstrap_name, bootstrap_email, bootstrap_password)):
-        if len(bootstrap_password) < 12:
-            raise RuntimeError("Bootstrap administrator password must be at least 12 characters.")
+        if all((bootstrap_number, bootstrap_name, bootstrap_email, bootstrap_password)):
+            if len(bootstrap_password) < 12:
+                raise RuntimeError("Bootstrap administrator password must be at least 12 characters.")
 
-        existing_admin = Employee.query.filter(
-            db.or_(
-                Employee.employee_number == bootstrap_number,
-                Employee.email == bootstrap_email
-            )
-        ).first()
+            existing_admin = Employee.query.filter(
+                db.or_(
+                    Employee.employee_number == bootstrap_number,
+                    Employee.email == bootstrap_email
+                )
+            ).first()
 
-        if existing_admin is None:
-            administrator = Employee(
-                employee_number=bootstrap_number,
-                full_name=bootstrap_name,
-                email=bootstrap_email,
-                password_hash=generate_password_hash(bootstrap_password),
-                role="admin"
-            )
-            db.session.add(administrator)
-            db.session.commit()
-            print("Initial Render administrator created successfully.")
-        else:
-            print("Bootstrap administrator already exists; no duplicate created.")
+            if existing_admin is None:
+                administrator = Employee(
+                    employee_number=bootstrap_number,
+                    full_name=bootstrap_name,
+                    email=bootstrap_email,
+                    password_hash=generate_password_hash(bootstrap_password),
+                    role="admin"
+                )
+                db.session.add(administrator)
+                db.session.commit()
+                print("Initial Render administrator created successfully.")
+            else:
+                print("Bootstrap administrator already exists; no duplicate created.")
 
     @app.cli.command("create-admin")
     def create_admin():
