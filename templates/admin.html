@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Administration | Corporate Convenience</title><link rel="stylesheet" href="{{ url_for('static', filename='stylesheet.css') }}"></head>
+<body>
+<header class="topbar"><a class="brand" href="{{ url_for('index') }}"><span class="brand-mark small">CC</span><span>Corporate <b>Convenience</b></span></a><nav><a href="{{ url_for('index') }}">Dashboard</a><a href="{{ url_for('analytics') }}">Analytics</a><a href="{{ url_for('archive') }}">Archive</a><a class="active" href="{{ url_for('admin') }}">Administration</a></nav><form method="POST" action="{{ url_for('logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="text-button">Sign out</button></form></header>
+<main class="page-wrap">
+<div class="page-heading"><div><p class="eyebrow orange-text">SYSTEM CONTROL</p><h1>Administration</h1><p class="muted">Manage access, departments and organisational activity.</p></div></div>
+{% with messages = get_flashed_messages(with_categories=true) %}{% for category, message in messages %}<div class="alert {{ category }}">{{ message }}</div>{% endfor %}{% endwith %}
+<section class="panel"><div class="section-heading"><div><p class="eyebrow orange-text">USER ACCESS</p><h2>Create an account</h2><p class="muted">Accounts are created by the main administrator. There is no public registration.</p></div></div>
+<form method="POST" action="{{ url_for('create_account') }}" class="form-grid">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<div class="field"><label>Full name</label><input name="full_name" required></div>
+<div class="field"><label>Employee number</label><input name="employee_number" required></div>
+<div class="field"><label>Email address</label><input name="email" type="email" required></div>
+<div class="field"><label>Temporary password (12+ characters)</label><input name="password" type="password" minlength="12" required></div>
+<div class="field"><label>Account role</label><select name="role" id="account-role"><option value="employee">Employee</option><option value="support">Department Administrator</option><option value="admin">Main Administrator</option></select></div>
+<div class="field" id="department-field"><label>Department</label><select name="department"><option value="">Select department</option>{% for department in departments if department.is_active %}<option value="{{ department.name }}">{{ department.name }}</option>{% endfor %}</select></div>
+<div class="field full form-actions"><span class="muted small-text">Department administrators can access only their own department's tickets.</span><button class="button button-primary" type="submit">Create account →</button></div>
+</form></section>
+
+<section class="panel"><div class="section-heading"><div><p class="eyebrow orange-text">DEPARTMENTS</p><h2>Active departments</h2></div><span class="count-pill">{{ departments|length }} departments</span></div>
+<div class="department-grid">{% for department in departments %}<div class="department-card"><strong>{{ department.name }}</strong><p>{{ department.description or 'Department services and requests.' }}</p><span class="status">{{ 'Active' if department.is_active else 'Inactive' }}</span></div>{% endfor %}</div>
+<p class="muted small-text">Department creation and editing controls will be added in the next administration enhancement. These six departments are available for routing and account assignment.</p>
+</section>
+
+<section class="panel"><div class="section-heading"><div><p class="eyebrow orange-text">REGISTERED USERS</p><h2>Accounts</h2></div><span class="count-pill">{{ employees|length }} users</span></div>
+<div class="table-wrap"><table><thead><tr><th>Name</th><th>Employee number</th><th>Email</th><th>Role</th><th>Department</th><th>Access</th><th></th></tr></thead><tbody>
+{% for employee in employees %}<tr><td><strong>{{ employee.full_name }}</strong></td><td>{{ employee.employee_number }}</td><td>{{ employee.email }}</td><td>{{ 'Main Administrator' if employee.role == 'admin' else ('Department Administrator' if employee.role == 'support' else 'Employee') }}</td><td>{{ employee.department or '—' }}</td><td><span class="status">{{ 'Active' if employee.is_active else 'Deactivated' }}</span></td><td>{% if employee.id != current_user.id %}<form method="POST" action="{{ url_for('toggle_account', employee_id=employee.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="table-link" type="submit">{{ 'Deactivate' if employee.is_active else 'Activate' }}</button></form>{% else %}<span class="muted small-text">You</span>{% endif %}</td></tr>{% endfor %}
+</tbody></table></div></section>
+
+<section class="panel"><div class="section-heading"><div><p class="eyebrow orange-text">RECENT ACTIVITY</p><h2>Audit log</h2></div></div>
+<div class="table-wrap"><table><thead><tr><th>Action</th><th>User</th><th>Details</th><th>Date</th></tr></thead><tbody>{% for log in audit_logs %}<tr><td><strong>{{ log.action }}</strong></td><td>{{ log.user.full_name if log.user else 'System' }}</td><td>{{ log.details or '—' }}</td><td>{{ log.created_at.strftime('%d %b %Y · %H:%M') if log.created_at else '—' }}</td></tr>{% else %}<tr><td colspan="4">No audit activity recorded yet.</td></tr>{% endfor %}</tbody></table></div></section>
+</main><footer class="site-footer">Corporate Convenience <span>·</span> A better way to be heard.</footer>
+<script>
+const role = document.getElementById('account-role');
+const department = document.getElementById('department-field');
+function updateDepartmentField(){ department.style.display = role.value === 'support' ? 'block' : 'none'; }
+role.addEventListener('change', updateDepartmentField); updateDepartmentField();
+</script>
+</body></html>

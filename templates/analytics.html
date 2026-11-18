@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Analytics | Corporate Convenience</title><link rel="stylesheet" href="{{ url_for('static', filename='stylesheet.css') }}"><script src="https://cdn.jsdelivr.net/npm/chart.js"></script></head>
+<body><header class="topbar"><a class="brand" href="{{ url_for('index') }}"><span class="brand-mark small">CC</span><span>Corporate <b>Convenience</b></span></a><nav><a href="{{ url_for('index') }}">Dashboard</a><a class="active" href="{{ url_for('analytics') }}">Analytics</a><a href="{{ url_for('archive') }}">Archive</a>{% if current_user.role == 'admin' %}<a href="{{ url_for('admin') }}">Administration</a>{% endif %}</nav><form method="POST" action="{{ url_for('logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="text-button">Sign out</button></form></header>
+<main class="page-wrap"><div class="page-heading"><div><p class="eyebrow orange-text">PERFORMANCE & INSIGHTS</p><h1>{{ 'Organisation analytics' if current_user.role == 'admin' else current_user.department ~ ' analytics' }}</h1><p class="muted">Insights calculated from recorded ticket activity. Empty metrics mean there is not yet enough recorded data.</p></div><form method="GET" class="period-filter"><label for="period">Reporting period</label><select id="period" name="period" onchange="this.form.submit()"><option value="month" {% if period == 'month' %}selected{% endif %}>This month</option><option value="last_month" {% if period == 'last_month' %}selected{% endif %}>Last month</option><option value="quarter" {% if period == 'quarter' %}selected{% endif %}>Last 90 days</option><option value="year" {% if period == 'year' %}selected{% endif %}>Last 12 months</option></select></form></div>
+<section class="kpi-grid">
+<div class="kpi-card"><span>Total received</span><strong>{{ total }}</strong><small>Tickets created in period</small></div>
+<div class="kpi-card"><span>Resolved</span><strong>{{ resolved }}</strong><small>Resolved in period's created-ticket cohort</small></div>
+<div class="kpi-card"><span>Active backlog</span><strong>{{ open_count }}</strong><small>Not currently archived</small></div>
+<div class="kpi-card"><span>Over 7 days old</span><strong>{{ overdue }}</strong><small>Active tickets older than seven days</small></div>
+<div class="kpi-card accent-kpi"><span>Resolution rate</span><strong>{{ resolution_rate }}%</strong><small>Resolved ÷ received</small></div>
+<div class="kpi-card"><span>High priority</span><strong>{{ high_priority }}</strong><small>High-priority tickets received</small></div>
+</section>
+<section class="kpi-grid secondary-kpis">
+<div class="kpi-card"><span>Average first response</span><strong>{{ average_response|string + ' hrs' if average_response is not none else '—' }}</strong><small>Based on recorded first replies</small></div>
+<div class="kpi-card"><span>Average resolution time</span><strong>{{ average_resolution|string + ' hrs' if average_resolution is not none else '—' }}</strong><small>Based on recorded resolution timestamps</small></div>
+</section>
+<section class="chart-grid">
+<div class="panel chart-panel"><div class="section-heading"><div><p class="eyebrow orange-text">VOLUME</p><h2>Ticket submissions</h2></div></div><canvas id="monthlyChart"></canvas></div>
+<div class="panel chart-panel"><div class="section-heading"><div><p class="eyebrow orange-text">PRIORITY</p><h2>Priority distribution</h2></div></div><canvas id="priorityChart"></canvas></div>
+<div class="panel chart-panel"><div class="section-heading"><div><p class="eyebrow orange-text">WORKFLOW</p><h2>Ticket statuses</h2></div></div><canvas id="statusChart"></canvas></div>
+</section>
+<section class="panel"><div class="section-heading"><div><p class="eyebrow orange-text">DEPARTMENT PERFORMANCE</p><h2>Volume and backlog</h2></div></div>
+<div class="table-wrap"><table><thead><tr><th>Department</th><th>Received</th><th>Resolved</th><th>Active backlog</th></tr></thead><tbody>{% for item in department_stats %}<tr><td><strong>{{ item.name }}</strong></td><td>{{ item.received }}</td><td>{{ item.resolved }}</td><td>{{ item.backlog }}</td></tr>{% else %}<tr><td colspan="4">No department data available.</td></tr>{% endfor %}</tbody></table></div></section>
+<p class="muted small-text analytics-disclaimer">Reporting note: first-response and resolution averages use recorded timestamps only. Older tickets created before these timestamps were introduced may not contribute to those averages. Monthly chart groups submissions by month within the selected reporting period.</p>
+</main><footer class="site-footer">Corporate Convenience <span>·</span> A better way to be heard.</footer>
+<script>
+const monthlyLabels = {{ monthly_labels|safe }};
+const monthlyValues = {{ monthly_values|safe }};
+const priorityLabels = {{ priority_labels|safe }};
+const priorityValues = {{ priority_values|safe }};
+const statusLabels = {{ status_labels|safe }};
+const statusValues = {{ status_values|safe }};
+Chart.defaults.font.family = 'DM Sans, sans-serif';
+Chart.defaults.color = '#718096';
+new Chart(document.getElementById('monthlyChart'), {type:'bar',data:{labels:monthlyLabels,datasets:[{label:'Tickets',data:monthlyValues,backgroundColor:'#e47736',borderRadius:6}]},options:{responsive:true,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,ticks:{precision:0}}}}});
+new Chart(document.getElementById('priorityChart'), {type:'doughnut',data:{labels:priorityLabels,datasets:[{data:priorityValues,backgroundColor:['#d95c4f','#e9a23b','#4d927d'],borderWidth:0}]},options:{responsive:true,plugins:{legend:{position:'bottom'}}}});
+new Chart(document.getElementById('statusChart'), {type:'bar',data:{labels:statusLabels,datasets:[{label:'Tickets',data:statusValues,backgroundColor:'#284765',borderRadius:6}]},options:{indexAxis:'y',responsive:true,plugins:{legend:{display:false}},scales:{x:{beginAtZero:true,ticks:{precision:0}}}}});
+</script></body></html>

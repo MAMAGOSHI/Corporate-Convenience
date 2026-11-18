@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="csrf-token" content="{{ csrf_token() }}">
+<title>{{ ticket.ticket_number }} | Corporate Convenience</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='stylesheet.css') }}">
+<script src="{{ url_for('static', filename='script.js') }}" defer></script>
+</head>
+<body>
+<header class="topbar">
+    <a class="brand" href="{{ url_for('index') }}"><span class="brand-mark small">CC</span><span>Corporate <b>Convenience</b></span></a>
+    <nav><a href="{{ url_for('index') }}">Dashboard</a>{% if current_user.role in ['admin','support'] %}<a href="{{ url_for('analytics') }}">Analytics</a><a href="{{ url_for('archive') }}">Archive</a>{% endif %}{% if current_user.role == 'admin' %}<a href="{{ url_for('admin') }}">Administration</a>{% endif %}</nav>
+    <form method="POST" action="{{ url_for('logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="text-button">Sign out</button></form>
+</header>
+<main class="page-wrap">
+    <div class="breadcrumbs"><a href="{{ url_for('index') }}">Dashboard</a><span>/</span>{{ ticket.ticket_number }}</div>
+    {% with messages = get_flashed_messages(with_categories=true) %}{% for category, message in messages %}<div class="alert {{ category }}">{{ message }}</div>{% endfor %}{% endwith %}
+    <section class="ticket-heading">
+        <div><p class="eyebrow orange-text">{{ ticket.ticket_number }}</p><h1>{{ ticket.subject }}</h1><p class="muted">Submitted by {{ ticket.employee.full_name }} · {{ ticket.created_at.strftime('%d %B %Y, %H:%M') if ticket.created_at else '' }}</p></div>
+        <div class="ticket-tags"><span class="priority priority-{{ ticket.priority|lower }}">{{ ticket.priority }} priority</span><span class="status">{{ ticket.status }}</span></div>
+    </section>
+    <div class="detail-layout">
+        <div class="main-column">
+            <section class="panel">
+                <p class="eyebrow orange-text">REQUEST DETAILS</p><h2>What happened?</h2>
+                <p class="description-text">{{ ticket.description }}</p>
+                <div class="detail-meta"><div><span>Department</span><strong>{{ ticket.department }}</strong></div><div><span>Suggested department</span><strong>{{ ticket.ai_suggested_department or '—' }}</strong></div><div><span>Suggested priority</span><strong>{{ ticket.ai_suggested_priority or '—' }}</strong></div><div><span>Priority reasoning</span><strong>{{ ticket.priority_reason or 'Not provided' }}</strong></div></div>
+            </section>
+
+            <section class="panel">
+                <div class="section-heading"><div><p class="eyebrow orange-text">COMMUNICATION</p><h2>Conversation</h2></div><span class="count-pill">{{ messages|length }} messages</span></div>
+                <div class="conversation">
+                    {% if messages %}
+                        {% for message in messages %}
+                        <article class="message {% if message.sender_id == current_user.id %}message-own{% endif %}">
+                            <div class="message-top"><strong>{{ message.sender.full_name }}</strong><span>{{ 'You' if message.sender_id == current_user.id else ('Employee' if message.sender.role == 'employee' else 'Support team') }}</span><time>{{ message.created_at.strftime('%d %b %Y · %H:%M') if message.created_at else '' }}</time></div>
+                            <p>{{ message.body }}</p>
+                            {% if message.is_ai_assisted %}<small class="ai-note">AI-assisted draft, reviewed before sending</small>{% endif %}
+                        </article>
+                        {% endfor %}
+                    {% else %}
+                    <div class="empty-state compact"><p class="muted">No messages yet. Use the form below to start the conversation.</p></div>
+                    {% endif %}
+                </div>
+                {% if not ticket.is_archived %}
+                <form method="POST" action="{{ url_for('reply_to_ticket', ticket_id=ticket.id) }}" class="reply-form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <label for="body">Write a message</label>
+                    <textarea id="body" name="body" rows="4" placeholder="Type your message here..." required></textarea>
+                    <input type="hidden" name="is_ai_assisted" id="is-ai-assisted" value="false">
+                    <div class="form-actions"><span class="muted small-text">Messages are visible to the employee and the assigned department.</span><button class="button button-primary" type="submit">Send message →</button></div>
+                </form>
+                {% else %}<p class="archive-note">This ticket is resolved and archived. Its conversation is retained for reference.</p>{% endif %}
+            </section>
+
+            <section class="panel">
+                <div class="section-heading"><div><p class="eyebrow orange-text">ACTIVITY LOG</p><h2>Ticket history</h2></div></div>
+                <div class="timeline">
+                {% for item in history %}
+                    <div class="timeline-item"><span class="timeline-dot"></span><div><strong>{{ item.action }}</strong><p>{{ item.details or '' }}</p><time>{{ item.created_at.strftime('%d %b %Y · %H:%M') if item.created_at else '' }}</time></div></div>
+                {% else %}<p class="muted">No activity recorded yet.</p>{% endfor %}
+                </div>
+            </section>
+        </div>
+
+        <aside class="side-column">
+            {% if can_manage and not ticket.is_archived %}
+            <section class="panel">
+                <p class="eyebrow orange-text">TICKET MANAGEMENT</p><h2>Update request</h2>
+                <form method="POST" action="{{ url_for('update_ticket', ticket_id=ticket.id) }}" class="stack-form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <label for="status">Status</label>
+                    <select id="status" name="status">{% for option in ['Open','In Progress','Awaiting Employee','Resolved'] %}<option value="{{ option }}" {% if ticket.status == option %}selected{% endif %}>{{ option }}</option>{% endfor %}</select>
+                    <label for="priority">Priority</label>
+                    <select id="priority" name="priority">{% for option in ['Low','Medium','High'] %}<option value="{{ option }}" {% if ticket.priority == option %}selected{% endif %}>{{ option }}</option>{% endfor %}</select>
+                    {% if is_main_admin %}
+                    <label for="department">Department</label>
+                    <select id="department" name="department">{% for department in departments %}<option value="{{ department.name }}" {% if ticket.department == department.name %}selected{% endif %}>{{ department.name }}</option>{% endfor %}</select>
+                    {% endif %}
+                    <label for="reason">Reason for changes</label><textarea id="reason" name="reason" rows="3" placeholder="Explain why you are making these changes"></textarea>
+                    <button class="button button-primary button-full" type="submit">Save changes</button>
+                </form>
+            </section>
+            <section class="panel ai-panel">
+                <p class="eyebrow orange-text">RESPONSE ASSISTANT</p><h2>Draft a reply</h2><p class="muted small-text">Generate a suggested response for human review. Nothing is sent automatically.</p>
+                <button class="button button-secondary button-full" id="draft-response" data-url="{{ url_for('draft_response', ticket_id=ticket.id) }}">Generate draft ✦</button>
+                <div id="draft-status" class="muted small-text" aria-live="polite"></div>
+            </section>
+            {% endif %}
+            <section class="panel">
+                <p class="eyebrow orange-text">REQUEST SUMMARY</p>
+                <div class="summary-row"><span>Reference</span><strong>{{ ticket.ticket_number }}</strong></div>
+                <div class="summary-row"><span>Employee</span><strong>{{ ticket.employee.full_name }}</strong></div>
+                <div class="summary-row"><span>Department</span><strong>{{ ticket.department }}</strong></div>
+                <div class="summary-row"><span>Priority</span><strong>{{ ticket.priority }}</strong></div>
+                <div class="summary-row"><span>Last updated</span><strong>{{ ticket.updated_at.strftime('%d %b %Y') if ticket.updated_at else '—' }}</strong></div>
+            </section>
+        </aside>
+    </div>
+</main>
+<footer class="site-footer">Corporate Convenience <span>·</span> A better way to be heard.</footer>
+</body>
+</html>
