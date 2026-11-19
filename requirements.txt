@@ -7,3 +7,7 @@ Werkzeug
 email-validator
 google-genai
 gunicorn
+
+reportlab==5.1.0
+
+psycopg[binary]==3.3.9

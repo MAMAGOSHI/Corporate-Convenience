@@ -206,3 +206,70 @@ class EmailNotification(db.Model):
     status = db.Column(db.String(30), default="Pending")
     error_message = db.Column(db.Text)
     created_at = db.Column(db.DateTime(timezone=True), default=now)
+
+
+class AIGovernanceDecision(db.Model):
+    """Accountability record for AI-assisted ticket decisions."""
+
+    __tablename__ = "ai_governance_decisions"
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    ticket_id = db.Column(
+        db.Integer,
+        db.ForeignKey("tickets.id"),
+        nullable=False,
+        index=True
+    )
+
+    decision_type = db.Column(
+        db.String(80),
+        nullable=False,
+        default="ticket_classification"
+    )
+
+    suggested_department = db.Column(db.String(100))
+    final_department = db.Column(db.String(100))
+
+    suggested_priority = db.Column(db.String(30))
+    final_priority = db.Column(db.String(30))
+
+    explanation = db.Column(db.Text)
+
+    decision_source = db.Column(
+        db.String(100),
+        default="Keyword baseline"
+    )
+
+    model_version = db.Column(
+        db.String(50),
+        default="1.0"
+    )
+
+    review_required = db.Column(
+        db.Boolean,
+        default=False,
+        nullable=False
+    )
+
+    review_status = db.Column(
+        db.String(40),
+        default="Not required",
+        nullable=False
+    )
+
+    reviewed_by_id = db.Column(
+        db.Integer,
+        db.ForeignKey("employees.id"),
+        nullable=True
+    )
+
+    reviewed_at = db.Column(db.DateTime(timezone=True))
+
+    override_reason = db.Column(db.Text)
+
+    created_at = db.Column(
+        db.DateTime(timezone=True),
+        default=now,
+        nullable=False
+    )

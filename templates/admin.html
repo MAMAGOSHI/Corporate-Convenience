@@ -28,6 +28,101 @@
 {% for employee in employees %}<tr><td><strong>{{ employee.full_name }}</strong></td><td>{{ employee.employee_number }}</td><td>{{ employee.email }}</td><td>{{ 'Main Administrator' if employee.role == 'admin' else ('Department Administrator' if employee.role == 'support' else 'Employee') }}</td><td>{{ employee.department or '—' }}</td><td><span class="status">{{ 'Active' if employee.is_active else 'Deactivated' }}</span></td><td>{% if employee.id != current_user.id %}<form method="POST" action="{{ url_for('toggle_account', employee_id=employee.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="table-link" type="submit">{{ 'Deactivate' if employee.is_active else 'Activate' }}</button></form>{% else %}<span class="muted small-text">You</span>{% endif %}</td></tr>{% endfor %}
 </tbody></table></div></section>
 
+
+<section class="panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow orange-text">RESPONSIBLE AI</p>
+            <h2>AI Governance Centre</h2>
+            <p class="muted">Monitor automated recommendations, explanations and human oversight.</p>
+        </div>
+        <span class="count-pill">Governance monitoring</span>
+        <a class="button button-primary"
+           href="{{ url_for('governance_report') }}">
+            Generate Governance Report
+        </a>
+    </div>
+
+    <div class="department-grid">
+        <div class="department-card">
+            <p class="muted">Total AI decisions</p>
+            <h2>{{ governance_total }}</h2>
+        </div>
+        <div class="department-card">
+            <p class="muted">Awaiting human review</p>
+            <h2>{{ governance_pending }}</h2>
+        </div>
+    </div>
+
+    <h3>Recent AI decisions</h3>
+
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Ticket ID</th>
+                    <th>Suggested department</th>
+                    <th>Final department</th>
+                    <th>Priority</th>
+                    <th>Explanation</th>
+                    <th>Human review</th>
+                    <th>Date</th>
+                    <th>Review action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for decision in governance_decisions %}
+                <tr>
+                    <td>#{{ decision.ticket_id }}</td>
+                    <td>{{ decision.suggested_department or '—' }}</td>
+                    <td>{{ decision.final_department or '—' }}</td>
+                    <td>{{ decision.suggested_priority or '—' }}</td>
+                    <td>{{ decision.explanation or 'No explanation recorded' }}</td>
+                    <td>{{ decision.review_status }}</td>
+                    <td>{{ decision.created_at.strftime('%d %b %Y') if decision.created_at else '—' }}</td><td>
+                        {% if decision.review_required and decision.review_status == 'Pending' %}
+                        <form method="POST" action="{{ url_for('review_ai_decision', decision_id=decision.id) }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+                            <label>Department</label>
+                            <select name="department" required>
+                                {% for department in departments if department.is_active %}
+                                <option value="{{ department.name }}" {% if department.name == decision.suggested_department %}selected{% endif %}>{{ department.name }}</option>
+                                {% endfor %}
+                            </select>
+
+                            <label>Priority</label>
+                            <select name="priority" required>
+                                {% for priority in ['Low', 'Medium', 'High'] %}
+                                <option value="{{ priority }}" {% if priority == decision.suggested_priority %}selected{% endif %}>{{ priority }}</option>
+                                {% endfor %}
+                            </select>
+
+                            <label>Review explanation</label>
+                            <textarea name="reason" required minlength="5" placeholder="Explain your decision..." rows="3"></textarea>
+
+                            <button class="button button-primary" type="submit">Submit review</button>
+                        </form>
+                        {% else %}
+                        <span class="status">{{ decision.review_status }}</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="8">No AI governance decisions recorded yet. New ticket submissions will appear here.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <p class="muted small-text">
+        AI recommendations are advisory. Human review is required when a request is flagged.
+        This dashboard records decisions; review and override controls will be added separately.
+    </p>
+</section>
+
 <section class="panel"><div class="section-heading"><div><p class="eyebrow orange-text">RECENT ACTIVITY</p><h2>Audit log</h2></div></div>
 <div class="table-wrap"><table><thead><tr><th>Action</th><th>User</th><th>Details</th><th>Date</th></tr></thead><tbody>{% for log in audit_logs %}<tr><td><strong>{{ log.action }}</strong></td><td>{{ log.user.full_name if log.user else 'System' }}</td><td>{{ log.details or '—' }}</td><td>{{ log.created_at.strftime('%d %b %Y · %H:%M') if log.created_at else '—' }}</td></tr>{% else %}<tr><td colspan="4">No audit activity recorded yet.</td></tr>{% endfor %}</tbody></table></div></section>
 </main><footer class="site-footer">Corporate Convenience <span>·</span> A better way to be heard.</footer>

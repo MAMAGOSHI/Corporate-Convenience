@@ -11,9 +11,23 @@ INSTANCE_DIR.mkdir(exist_ok=True)
 
 class Config:
     SECRET_KEY = os.getenv("SECRET_KEY")
-    SQLALCHEMY_DATABASE_URI = (
-        "sqlite:///" + str(INSTANCE_DIR / "corporate_convenience.db")
-    )
+    DATABASE_URL = os.getenv("DATABASE_URL")
+
+    if DATABASE_URL:
+        if DATABASE_URL.startswith("postgres://"):
+            DATABASE_URL = DATABASE_URL.replace(
+                "postgres://", "postgresql+psycopg://", 1
+            )
+        elif DATABASE_URL.startswith("postgresql://"):
+            DATABASE_URL = DATABASE_URL.replace(
+                "postgresql://", "postgresql+psycopg://", 1
+            )
+
+        SQLALCHEMY_DATABASE_URI = DATABASE_URL
+    else:
+        SQLALCHEMY_DATABASE_URI = (
+            "sqlite:///" + str(INSTANCE_DIR / "corporate_convenience.db")
+        )
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     MAX_CONTENT_LENGTH = 5 * 1024 * 1024
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")

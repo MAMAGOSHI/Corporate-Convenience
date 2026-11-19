@@ -1,3 +1,4 @@
+from io import BytesIO
 import json
 import os
 import secrets
@@ -6,7 +7,7 @@ from functools import wraps
 
 from flask import (
     Flask, render_template, request, redirect, url_for,
-    flash, abort, jsonify, current_app
+    flash, abort, jsonify, current_app, send_file
 )
 from flask_login import (
     LoginManager, login_user, logout_user,
@@ -15,10 +16,17 @@ from flask_login import (
 from werkzeug.security import check_password_hash, generate_password_hash
 from flask_wtf.csrf import CSRFProtect
 
+from reportlab.lib.pagesizes import A4
+from reportlab.lib import colors
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import mm
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+
 from backend.config import Config
 from backend.database import (
     db, Employee, Department, Ticket, TicketMessage,
-    TicketHistory, PriorityDecision, AuditLog, EmailNotification
+    TicketHistory, PriorityDecision, AuditLog, EmailNotification,
+    AIGovernanceDecision
 )
 from backend.classifier import classify_ticket
 from backend.email_service import send_notification
@@ -252,12 +260,55 @@ def create_app():
             decision_source="Keyword baseline"
         ))
 
+        # Store the AI recommendation for governance and accountability.
+        db.session.add(AIGovernanceDecision(
+            ticket_id=ticket.id,
+            decision_type="ticket_classification",
+            suggested_department=department,
+            final_department=department,
+            suggested_priority=priority,
+            final_priority=priority,
+            explanation=(
+                classification["department_reason"]
+                + " "
+                + classification["priority_reason"]
+            ),
+            decision_source="Keyword baseline",
+            model_version="1.0",
+            review_required=classification["requires_review"],
+            review_status=(
+                "Pending" if classification["requires_review"]
+                else "Not required"
+            )
+        ))
+
         record_audit(
             "Ticket submitted",
             "Ticket",
             ticket.id,
             "Submitted by " + current_user.employee_number
         )
+
+        # Record AI routing explanations and requests needing human review.
+        add_history(
+            ticket,
+            "AI department suggestion",
+            classification["department_reason"]
+        )
+
+        if classification["requires_review"]:
+            add_history(
+                ticket,
+                "AI routing review required",
+                classification["department_reason"]
+            )
+
+            record_audit(
+                "AI routing review required",
+                "Ticket",
+                ticket.id,
+                classification["department_reason"]
+            )
 
         notify(
             current_user.email,
@@ -622,6 +673,206 @@ def create_app():
             high_priority=high_priority
         )
 
+
+    @app.route("/admin/governance/report")
+    @role_required("admin")
+    def governance_report():
+        from xml.sax.saxutils import escape
+
+        decisions = (
+            AIGovernanceDecision.query
+            .order_by(AIGovernanceDecision.created_at.desc())
+            .all()
+        )
+
+        total = len(decisions)
+
+        pending = sum(
+            1 for decision in decisions
+            if decision.review_required
+            and decision.review_status == "Pending"
+        )
+
+        reviewed = sum(
+            1 for decision in decisions
+            if decision.review_status == "Reviewed"
+        )
+
+        overrides = sum(
+            1 for decision in decisions
+            if (
+                decision.suggested_department != decision.final_department
+                or decision.suggested_priority != decision.final_priority
+            )
+            and decision.review_status == "Reviewed"
+        )
+
+        departments = {}
+        for decision in decisions:
+            department = decision.final_department or "Unassigned"
+            departments[department] = departments.get(department, 0) + 1
+
+        buffer = BytesIO()
+
+        document = SimpleDocTemplate(
+            buffer,
+            pagesize=A4,
+            rightMargin=18 * mm,
+            leftMargin=18 * mm,
+            topMargin=18 * mm,
+            bottomMargin=18 * mm
+        )
+
+        styles = getSampleStyleSheet()
+        styles["Title"].textColor = colors.HexColor("#142D4E")
+        styles["Heading2"].textColor = colors.HexColor("#2F5D8A")
+
+        elements = []
+
+        elements.append(Paragraph(
+            "Corporate Convenience",
+            styles["Title"]
+        ))
+
+        elements.append(Paragraph(
+            "AI Governance Report",
+            styles["Heading1"]
+        ))
+
+        elements.append(Paragraph(
+            "Generated: " + utc_now().strftime("%d %B %Y, %H:%M UTC"),
+            styles["Normal"]
+        ))
+
+        elements.append(Spacer(1, 16))
+
+        elements.append(Paragraph(
+            "1. Governance Summary",
+            styles["Heading2"]
+        ))
+
+        summary_data = [
+            ["Governance measure", "Recorded value"],
+            ["Total AI decisions", str(total)],
+            ["Pending human reviews", str(pending)],
+            ["Completed human reviews", str(reviewed)],
+            ["Recorded administrator overrides", str(overrides)]
+        ]
+
+        summary_table = Table(summary_data, colWidths=[280, 150])
+        summary_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#142D4E")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+            ("PADDING", (0, 0), (-1, -1), 8),
+            ("VALIGN", (0, 0), (-1, -1), "TOP")
+        ]))
+
+        elements.append(summary_table)
+        elements.append(Spacer(1, 16))
+
+        elements.append(Paragraph(
+            "2. Department Distribution",
+            styles["Heading2"]
+        ))
+
+        department_data = [["Department", "Decisions"]]
+
+        if departments:
+            for name, count in sorted(departments.items()):
+                department_data.append([name, str(count)])
+        else:
+            department_data.append(["No recorded decisions", "0"])
+
+        department_table = Table(department_data, colWidths=[280, 150])
+        department_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2F5D8A")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+            ("PADDING", (0, 0), (-1, -1), 8)
+        ]))
+
+        elements.append(department_table)
+        elements.append(Spacer(1, 16))
+
+        elements.append(Paragraph(
+            "3. Recent AI Decisions",
+            styles["Heading2"]
+        ))
+
+        decision_data = [[
+            "Ticket",
+            "Suggested department",
+            "Final department",
+            "Review status"
+        ]]
+
+        for decision in decisions[:50]:
+            decision_data.append([
+                str(decision.ticket_id),
+                Paragraph(
+                    escape(decision.suggested_department or "—"),
+                    styles["Normal"]
+                ),
+                Paragraph(
+                    escape(decision.final_department or "—"),
+                    styles["Normal"]
+                ),
+                Paragraph(
+                    escape(decision.review_status or "Not recorded"),
+                    styles["Normal"]
+                )
+            ])
+
+        if not decisions:
+            decision_data.append([
+                "No governance decisions recorded yet.",
+                "",
+                "",
+                ""
+            ])
+
+        decision_table = Table(
+            decision_data,
+            colWidths=[45, 125, 125, 105],
+            repeatRows=1
+        )
+
+        decision_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#142D4E")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+            ("PADDING", (0, 0), (-1, -1), 6),
+            ("VALIGN", (0, 0), (-1, -1), "TOP")
+        ]))
+
+        elements.append(decision_table)
+        elements.append(Spacer(1, 16))
+
+        elements.append(Paragraph(
+            "4. Governance Notes",
+            styles["Heading2"]
+        ))
+
+        elements.append(Paragraph(
+            "This report reflects the governance records available in the "
+            "Corporate Convenience database at the time of generation. "
+            "The classifier is a keyword-based baseline. Recorded statistics "
+            "should not be interpreted as proof of classification accuracy "
+            "or statistical fairness. Human oversight remains important.",
+            styles["Normal"]
+        ))
+
+        document.build(elements)
+        buffer.seek(0)
+
+        return send_file(
+            buffer,
+            mimetype="application/pdf",
+            as_attachment=True,
+            download_name="Corporate_Convenience_AI_Governance_Report.pdf"
+        )
+
     @app.route("/admin")
     @role_required("admin")
     def admin():
@@ -630,13 +881,126 @@ def create_app():
         audit_logs = AuditLog.query.order_by(AuditLog.created_at.desc()).limit(25).all()
         departments = Department.query.order_by(Department.name).all()
 
+        governance_decisions = (
+            AIGovernanceDecision.query
+            .order_by(AIGovernanceDecision.created_at.desc())
+            .limit(20)
+            .all()
+        )
+
+        governance_total = AIGovernanceDecision.query.count()
+
+        governance_pending = AIGovernanceDecision.query.filter_by(
+            review_required=True,
+            review_status="Pending"
+        ).count()
+
         return render_template(
             "admin.html",
             employees=employees,
             recent_tickets=recent_tickets,
             audit_logs=audit_logs,
-            departments=departments
+            departments=departments,
+            governance_decisions=governance_decisions,
+            governance_total=governance_total,
+            governance_pending=governance_pending
         )
+
+    @app.route("/admin/governance/<int:decision_id>/review", methods=["POST"])
+    @role_required("admin")
+    def review_ai_decision(decision_id):
+        decision = AIGovernanceDecision.query.get_or_404(decision_id)
+
+        if not decision.review_required or decision.review_status != "Pending":
+            flash("This decision does not have a pending review.", "error")
+            return redirect(url_for("admin"))
+
+        ticket = Ticket.query.get_or_404(decision.ticket_id)
+
+        new_department = request.form.get(
+            "department", decision.suggested_department
+        ).strip()
+
+        new_priority = request.form.get(
+            "priority", decision.suggested_priority
+        ).strip()
+
+        reason = request.form.get("reason", "").strip()
+
+        valid_priorities = ["Low", "Medium", "High"]
+
+        department_exists = Department.query.filter_by(
+            name=new_department,
+            is_active=True
+        ).first()
+
+        if not department_exists or new_priority not in valid_priorities:
+            flash("Please select a valid active department and priority.", "error")
+            return redirect(url_for("admin"))
+
+        if not reason:
+            flash("A review explanation is required.", "error")
+            return redirect(url_for("admin"))
+
+        old_department = ticket.department
+        old_priority = ticket.priority
+
+        # Update the final human-approved decision.
+        decision.final_department = new_department
+        decision.final_priority = new_priority
+        decision.reviewed_by_id = current_user.id
+        decision.reviewed_at = utc_now()
+        decision.override_reason = reason
+        decision.review_status = "Reviewed"
+
+        # Preserve the original AI suggestions in the governance record.
+        ticket.department = new_department
+        ticket.priority = new_priority
+        ticket.priority_reason = reason
+        ticket.updated_at = utc_now()
+
+        if old_department != new_department:
+            add_history(
+                ticket,
+                "AI department recommendation reviewed",
+                old_department + " -> " + new_department + ". " + reason
+            )
+            notify_department(ticket)
+
+        if old_priority != new_priority:
+            db.session.add(PriorityDecision(
+                ticket_id=ticket.id,
+                suggested_priority=decision.suggested_priority,
+                final_priority=new_priority,
+                reason=reason,
+                decision_source="Administrator AI governance review"
+            ))
+            add_history(
+                ticket,
+                "AI priority recommendation reviewed",
+                old_priority + " -> " + new_priority + ". " + reason
+            )
+
+        add_history(
+            ticket,
+            "AI governance review completed",
+            "Reviewed by " + current_user.full_name + ". " + reason
+        )
+
+        record_audit(
+            "AI governance review completed",
+            "Ticket",
+            ticket.id,
+            "Governance decision " + str(decision.id)
+            + ". Department: " + new_department
+            + ". Priority: " + new_priority
+            + ". Reason: " + reason
+        )
+
+        db.session.commit()
+
+        flash("AI recommendation reviewed successfully.", "success")
+        return redirect(url_for("admin"))
 
     @app.route("/admin/accounts", methods=["POST"])
     @role_required("admin")
