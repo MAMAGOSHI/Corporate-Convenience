@@ -22,6 +22,34 @@
 </section>
 <section class="panel"><div class="section-heading"><div><p class="eyebrow orange-text">DEPARTMENT PERFORMANCE</p><h2>Volume and backlog</h2></div></div>
 <div class="table-wrap"><table><thead><tr><th>Department</th><th>Received</th><th>Resolved</th><th>Active backlog</th></tr></thead><tbody>{% for item in department_stats %}<tr><td><strong>{{ item.name }}</strong></td><td>{{ item.received }}</td><td>{{ item.resolved }}</td><td>{{ item.backlog }}</td></tr>{% else %}<tr><td colspan="4">No department data available.</td></tr>{% endfor %}</tbody></table></div></section>
+
+<section class="panel business-report-panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow orange-text">BUSINESS INTELLIGENCE</p>
+            <h2>Business Report Generator</h2>
+            <p class="muted">
+                Download a management report or export statistics for Excel and Power BI.
+                Downloads follow the reporting period selected above.
+            </p>
+        </div>
+    </div>
+
+    {% if current_user.role in ['admin', 'support'] %}
+    <div class="report-actions">
+        <a class="button button-primary"
+           href="{{ url_for('business_report_pdf', period=period) }}">
+            Download PDF Report
+        </a>
+
+        <a class="button button-secondary"
+           href="{{ url_for('business_report_csv', period=period) }}">
+            Download CSV Statistics
+        </a>
+    </div>
+    {% endif %}
+</section>
+
 <p class="muted small-text analytics-disclaimer">Reporting note: first-response and resolution averages use recorded timestamps only. Older tickets created before these timestamps were introduced may not contribute to those averages. Monthly chart groups submissions by month within the selected reporting period.</p>
 </main><footer class="site-footer">Corporate Convenience <span>·</span> A better way to be heard.</footer>
 <script>

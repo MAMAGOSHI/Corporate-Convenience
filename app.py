@@ -1,4 +1,5 @@
-from io import BytesIO
+from io import BytesIO, StringIO
+import csv
 import json
 import os
 import secrets
@@ -673,6 +674,362 @@ def create_app():
             high_priority=high_priority
         )
 
+
+
+    def get_business_report_data():
+        period = request.args.get("period", "month")
+        end_date = datetime.now().date()
+
+        if period == "quarter":
+            start_date = end_date - timedelta(days=90)
+            period_label = "Last 90 days"
+        elif period == "year":
+            start_date = end_date - timedelta(days=365)
+            period_label = "Last 12 months"
+        elif period == "last_month":
+            first_this_month = end_date.replace(day=1)
+            end_date = first_this_month - timedelta(days=1)
+            start_date = end_date.replace(day=1)
+            period_label = "Last month"
+        else:
+            start_date = end_date.replace(day=1)
+            period = "month"
+            period_label = "This month"
+
+        query = Ticket.query
+
+        if is_department_admin():
+            query = query.filter_by(department=current_user.department)
+
+        tickets = query.all()
+
+        tickets = [
+            ticket for ticket in tickets
+            if ticket.created_at
+            and start_date <= ticket.created_at.date() <= end_date
+        ]
+
+        total = len(tickets)
+        resolved = sum(1 for ticket in tickets if ticket.status == "Resolved")
+        outstanding = sum(
+            1 for ticket in tickets
+            if not ticket.is_archived and ticket.status != "Resolved"
+        )
+
+        overdue = sum(
+            1 for ticket in tickets
+            if not ticket.is_archived
+            and ticket.status != "Resolved"
+            and ticket.created_at
+            and (utc_now().replace(tzinfo=None)
+                 - ticket.created_at.replace(tzinfo=None)).days > 7
+        )
+
+        resolution_times = [
+            (ticket.resolved_at.replace(tzinfo=None)
+             - ticket.created_at.replace(tzinfo=None)).total_seconds() / 3600
+            for ticket in tickets
+            if ticket.resolved_at and ticket.created_at
+        ]
+
+        response_times = [
+            (ticket.first_response_at.replace(tzinfo=None)
+             - ticket.created_at.replace(tzinfo=None)).total_seconds() / 3600
+            for ticket in tickets
+            if ticket.first_response_at and ticket.created_at
+        ]
+
+        departments = (
+            [current_user.department]
+            if is_department_admin()
+            else [
+                item.name
+                for item in Department.query.filter_by(is_active=True).all()
+            ]
+        )
+
+        department_stats = []
+
+        for name in departments:
+            department_tickets = [
+                ticket for ticket in tickets if ticket.department == name
+            ]
+
+            department_stats.append({
+                "name": name,
+                "received": len(department_tickets),
+                "resolved": sum(
+                    1 for ticket in department_tickets
+                    if ticket.status == "Resolved"
+                ),
+                "outstanding": sum(
+                    1 for ticket in department_tickets
+                    if not ticket.is_archived
+                    and ticket.status != "Resolved"
+                )
+            })
+
+        priority_stats = {
+            level: sum(1 for ticket in tickets if ticket.priority == level)
+            for level in ["High", "Medium", "Low"]
+        }
+
+        status_stats = {}
+
+        for ticket in tickets:
+            status_stats[ticket.status] = (
+                status_stats.get(ticket.status, 0) + 1
+            )
+
+        return {
+            "period": period,
+            "period_label": period_label,
+            "start_date": start_date,
+            "end_date": end_date,
+            "total": total,
+            "resolved": resolved,
+            "outstanding": outstanding,
+            "overdue": overdue,
+            "resolution_rate": round(resolved / total * 100, 1) if total else 0,
+            "average_resolution": (
+                round(sum(resolution_times) / len(resolution_times), 1)
+                if resolution_times else None
+            ),
+            "average_response": (
+                round(sum(response_times) / len(response_times), 1)
+                if response_times else None
+            ),
+            "department_stats": department_stats,
+            "priority_stats": priority_stats,
+            "status_stats": status_stats
+        }
+
+    @app.route("/analytics/report/pdf")
+    @login_required
+    def business_report_pdf():
+        if not (is_main_admin() or is_department_admin()):
+            abort(403)
+
+        report = get_business_report_data()
+        buffer = BytesIO()
+
+        document = SimpleDocTemplate(
+            buffer,
+            pagesize=A4,
+            rightMargin=18 * mm,
+            leftMargin=18 * mm,
+            topMargin=18 * mm,
+            bottomMargin=18 * mm
+        )
+
+        styles = getSampleStyleSheet()
+        story = []
+
+        story.append(Paragraph(
+            "Corporate Convenience",
+            styles["Title"]
+        ))
+        story.append(Paragraph(
+            "Business Performance Report",
+            styles["Heading1"]
+        ))
+        story.append(Paragraph(
+            "Reporting period: "
+            + report["period_label"]
+            + " ("
+            + report["start_date"].isoformat()
+            + " to "
+            + report["end_date"].isoformat()
+            + ")",
+            styles["Normal"]
+        ))
+        story.append(Spacer(1, 12))
+
+        story.append(Paragraph("Executive Summary", styles["Heading2"]))
+
+        summary_data = [
+            ["Metric", "Result"],
+            ["Tickets received", str(report["total"])],
+            ["Resolved tickets", str(report["resolved"])],
+            ["Outstanding tickets", str(report["outstanding"])],
+            ["Overdue tickets (over 7 days)", str(report["overdue"])],
+            ["Resolution rate", str(report["resolution_rate"]) + "%"],
+            [
+                "Average first response",
+                str(report["average_response"]) + " hours"
+                if report["average_response"] is not None else "Not available"
+            ],
+            [
+                "Average resolution time",
+                str(report["average_resolution"]) + " hours"
+                if report["average_resolution"] is not None else "Not available"
+            ]
+        ]
+
+        summary_table = Table(summary_data, colWidths=[100 * mm, 65 * mm])
+        summary_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#284765")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#D8DEE8")),
+            ("PADDING", (0, 0), (-1, -1), 7),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE")
+        ]))
+
+        story.append(summary_table)
+        story.append(Spacer(1, 16))
+
+        story.append(Paragraph("Department Performance", styles["Heading2"]))
+
+        department_data = [["Department", "Received", "Resolved", "Outstanding"]]
+
+        for item in report["department_stats"]:
+            department_data.append([
+                item["name"],
+                str(item["received"]),
+                str(item["resolved"]),
+                str(item["outstanding"])
+            ])
+
+        department_table = Table(
+            department_data,
+            repeatRows=1,
+            colWidths=[75 * mm, 30 * mm, 30 * mm, 30 * mm]
+        )
+        department_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#284765")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#D8DEE8")),
+            ("PADDING", (0, 0), (-1, -1), 6)
+        ]))
+
+        story.append(department_table)
+        story.append(Spacer(1, 16))
+
+        story.append(Paragraph("Priority Distribution", styles["Heading2"]))
+
+        priority_data = [["Priority", "Tickets"]]
+
+        for level, count in report["priority_stats"].items():
+            priority_data.append([level, str(count)])
+
+        priority_table = Table(priority_data, colWidths=[80 * mm, 80 * mm])
+        priority_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#284765")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#D8DEE8")),
+            ("PADDING", (0, 0), (-1, -1), 6)
+        ]))
+
+        story.append(priority_table)
+        story.append(Spacer(1, 16))
+
+        story.append(Paragraph("Management Notes", styles["Heading2"]))
+
+        if report["total"] == 0:
+            note = "No tickets were recorded during this reporting period. "
+            note += "There is insufficient activity to calculate performance trends."
+        else:
+            note = (
+                "The report records "
+                + str(report["total"])
+                + " tickets, with a resolution rate of "
+                + str(report["resolution_rate"])
+                + "%. "
+            )
+
+            if report["overdue"] > 0:
+                note += (
+                    str(report["overdue"])
+                    + " active tickets are older than seven days and may need attention. "
+                )
+            else:
+                note += "No active tickets older than seven days were identified. "
+
+            note += (
+                "These notes are calculated from recorded operational data. "
+                "They are not predictive model outputs."
+            )
+
+        story.append(Paragraph(note, styles["BodyText"]))
+        story.append(Spacer(1, 12))
+        story.append(Paragraph(
+            "Confidential business report | Generated "
+            + datetime.now().strftime("%Y-%m-%d %H:%M"),
+            styles["Italic"]
+        ))
+
+        document.build(story)
+        buffer.seek(0)
+
+        record_audit(
+            "Business performance PDF downloaded",
+            "Business Report",
+            None
+        )
+        db.session.commit()
+
+        return send_file(
+            buffer,
+            mimetype="application/pdf",
+            as_attachment=True,
+            download_name="Corporate_Convenience_Business_Report.pdf"
+        )
+
+    @app.route("/analytics/report/csv")
+    @login_required
+    def business_report_csv():
+        if not (is_main_admin() or is_department_admin()):
+            abort(403)
+
+        report = get_business_report_data()
+        output = StringIO()
+        writer = csv.writer(output)
+
+        writer.writerow(["Corporate Convenience - Business Statistics"])
+        writer.writerow(["Reporting period", report["period_label"]])
+        writer.writerow(["Start date", report["start_date"].isoformat()])
+        writer.writerow(["End date", report["end_date"].isoformat()])
+        writer.writerow([])
+        writer.writerow(["Metric", "Value"])
+        writer.writerow(["Tickets received", report["total"]])
+        writer.writerow(["Resolved tickets", report["resolved"]])
+        writer.writerow(["Outstanding tickets", report["outstanding"]])
+        writer.writerow(["Overdue tickets", report["overdue"]])
+        writer.writerow(["Resolution rate (%)", report["resolution_rate"]])
+        writer.writerow(["Average first response (hours)", report["average_response"]])
+        writer.writerow(["Average resolution time (hours)", report["average_resolution"]])
+        writer.writerow([])
+        writer.writerow(["Department", "Received", "Resolved", "Outstanding"])
+
+        for item in report["department_stats"]:
+            writer.writerow([
+                item["name"],
+                item["received"],
+                item["resolved"],
+                item["outstanding"]
+            ])
+
+        writer.writerow([])
+        writer.writerow(["Priority", "Tickets"])
+
+        for level, count in report["priority_stats"].items():
+            writer.writerow([level, count])
+
+        output.seek(0)
+
+        record_audit(
+            "Business performance CSV downloaded",
+            "Business Report",
+            None
+        )
+        db.session.commit()
+
+        return send_file(
+            BytesIO(output.getvalue().encode("utf-8-sig")),
+            mimetype="text/csv; charset=utf-8",
+            as_attachment=True,
+            download_name="Corporate_Convenience_Business_Report.csv"
+        )
 
     @app.route("/admin/governance/report")
     @role_required("admin")
